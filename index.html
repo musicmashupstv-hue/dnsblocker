@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Two-State DNS Blocker</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #131720;
+    --panel-2: #0f131b;
+    --border: #212938;
+    --border-hi: #2e3849;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --blocked: #f85149;
+    --allowed: #3fb950;
+    --error: #d29922;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 50% -10%, #16202f 0%, var(--bg) 60%);
+    color: var(--text);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+    padding: 32px 20px 64px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+
+  header.top {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+  header.top h1 {
+    font-size: 28px;
+    margin: 0 0 6px;
+    letter-spacing: -0.02em;
+  }
+  header.top p {
+    color: var(--muted);
+    margin: 0;
+    font-size: 14px;
+  }
+  .pill {
+    display: inline-block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 3px 9px;
+    border-radius: 99px;
+    background: rgba(88,166,255,.12);
+    color: var(--accent);
+    border: 1px solid rgba(88,166,255,.3);
+    margin-bottom: 10px;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .panel h2 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin: 0 0 14px;
+    font-weight: 600;
+  }
+
+  /* ---------- query bar ---------- */
+  .query-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  #domain {
+    flex: 1;
+    background: var(--panel-2);
+    border: 1px solid var(--border-hi);
+    color: var(--text);
+    padding: 12px 14px;
+    border-radius: 8px;
+    font: 15px var(--mono);
+    outline: none;
+    transition: border-color .15s;
+  }
+  #domain:focus { border-color: var(--accent); }
+  #resolveBtn {
+    background: var(--accent);
+    color: #04121f;
+    border: none;
+    font-weight: 600;
+    padding: 0 22px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: filter .15s;
+  }
+  #resolveBtn:hover { filter: brightness(1.1); }
+  #resolveBtn:disabled { opacity: .5; cursor: wait; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    background: transparent;
+    border: 1px solid var(--border-hi);
+    color: var(--muted);
+    font: 12px var(--mono);
+    padding: 4px 10px;
+    border-radius: 99px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .chip:hover { color: var(--text); border-color: var(--accent); }
+
+  /* ---------- states grid ---------- */
+  .states {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 720px) { .states { grid-template-columns: 1fr; } }
+
+  .state {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+  }
+  .state-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .state-head h3 {
+    margin: 0;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .dot {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--allowed);
+    box-shadow: 0 0 8px currentColor;
+    color: var(--allowed);
+  }
+  .dot.off { background: var(--muted); color: var(--muted); box-shadow: none; }
+
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+  }
+  .toggle input { accent-color: var(--accent); }
+
+  .state-desc {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 14px;
+    font-family: var(--mono);
+  }
+
+  .result {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    min-height: 90px;
+    font-family: var(--mono);
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    word-break: break-all;
+  }
+  .result.idle { color: var(--muted); font-style: italic; }
+  .result .verdict {
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    font-size: 12px;
+  }
+  .result.blocked .verdict { color: var(--blocked); }
+  .result.allowed .verdict { color: var(--allowed); }
+  .result.error  .verdict { color: var(--error); }
+  .result .detail { color: var(--muted); font-size: 12px; }
+
+  .stats {
+    display: flex;
+    gap: 16px;
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .stats b { color: var(--text); font-family: var(--mono); }
+
+  /* ---------- log ---------- */
+  #log {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font: 12px/1.6 var(--mono);
+    max-height: 240px;
+    overflow-y: auto;
+  }
+  #log .entry { display: flex; gap: 10px; padding: 2px 0; }
+  #log .entry .t { color: #4a5567; flex-shrink: 0; }
+  #log .entry.blocked .msg { color: var(--blocked); }
+  #log .entry.allowed .msg { color: var(--allowed); }
+  #log .entry.error   .msg { color: var(--error); }
+  #log .entry.info    .msg { color: var(--muted); }
+  #log .empty { color: var(--muted); font-style: italic; }
+
+  /* ---------- settings ---------- */
+  details {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 10px;
+  }
+  details summary {
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text);
+    user-select: none;
+  }
+  details[open] summary { margin-bottom: 10px; }
+  details textarea {
+    width: 100%;
+    min-height: 180px;
+    background: var(--bg);
+    border: 1px solid var(--border-hi);
+    color: var(--text);
+    font: 12px/1.6 var(--mono);
+    padding: 10px;
+    border-radius: 6px;
+    resize: vertical;
+    outline: none;
+  }
+  details textarea:focus { border-color: var(--accent); }
+  details .hint {
+    font-size: 11px;
+    color: var(--muted);
+    margin: 6px 0 0;
+  }
+
+  .btn-row { display: flex; gap: 10px; margin-top: 8px; }
+  .btn {
+    background: transparent;
+    border: 1px solid var(--border-hi);
+    color: var(--text);
+    padding: 9px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary {
+    background: var(--accent);
+    color: #04121f;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  .btn.primary:hover { filter: brightness(1.1); color: #04121f; }
+
+  footer.note {
+    color: var(--muted);
+    font-size: 12px;
+    text-align: center;
+    margin-top: 32px;
+    line-height: 1.7;
+  }
+  footer.note code {
+    background: var(--panel-2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: var(--mono);
+    border: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="pill">Browser Edition</div>
+    <h1>Two-State DNS Blocker</h1>
+    <p>Resolves real domains via DNS-over-HTTPS and applies each state's blocklist live.</p>
+  </header>
+
+  <!-- ============ QUERY ============ -->
+  <section class="panel">
+    <h2>Look up a domain</h2>
+    <div class="query-row">
+      <input id="domain" type="text" placeholder="doubleclick.net" autocomplete="off" spellcheck="false">
+      <button id="resolveBtn">Resolve</button>
+    </div>
+    <div class="chips">
+      <button class="chip" data-d="doubleclick.net">doubleclick.net</button>
+      <button class="chip" data-d="google-analytics.com">google-analytics.com</button>
+      <button class="chip" data-d="ads.example.net">ads.example.net</button>
+      <button class="chip" data-d="github.com">github.com</button>
+      <button class="chip" data-d="wikipedia.org">wikipedia.org</button>
+      <button class="chip" data-d="example-tracker.com">example-tracker.com</button>
+    </div>
+  </section>
+
+  <!-- ============ STATES ============ -->
+  <section class="states">
+    <div class="state">
+      <div class="state-head">
+        <h3><span class="dot" id="dot1"></span>State 1</h3>
+        <label class="toggle">
+          <input type="checkbox" id="toggle1" checked> blocking
+        </label>
+      </div>
+      <div class="state-desc">ads + trackers</div>
+      <div class="result idle" id="result1">— enter a domain —</div>
+      <div class="stats">
+        <span>blocked <b id="s1b">0</b></span>
+        <span>allowed <b id="s1a">0</b></span>
+        <span>rules <b id="s1n">0</b></span>
+      </div>
+    </div>
+
+    <div class="state">
+      <div class="state-head">
+        <h3><span class="dot" id="dot2"></span>State 2</h3>
+        <label class="toggle">
+          <input type="checkbox" id="toggle2" checked> blocking
+        </label>
+      </div>
+      <div class="state-desc">ads + trackers + extra</div>
+      <div class="result idle" id="result2">— enter a domain —</div>
+      <div class="stats">
+        <span>blocked <b id="s2b">0</b></span>
+        <span>allowed <b id="s2a">0</b></span>
+        <span>rules <b id="s2n">0</b></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ LOG ============ -->
+  <section class="panel">
+    <h2>Activity log</h2>
+    <div id="log"><div class="empty">No queries yet.</div></div>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section class="panel">
+    <h2>Blocklists</h2>
+
+    <details>
+      <summary>Ads &amp; Trackers — shared by State 1 and State 2</summary>
+      <textarea id="adsList" spellcheck="false"></textarea>
+      <p class="hint">One domain per line. Lines starting with <code>#</code> are ignored. A rule for <code>example.com</code> also blocks every subdomain.</p>
+    </details>
+
+    <details>
+      <summary>State 2 extras — only State 2 blocks these</summary>
+      <textarea id="state2List" spellcheck="false"></textarea>
+      <p class="hint">Add domains that should be blocked only in the stricter state.</p>
+    </details>
+
+    <div class="btn-row">
+      <button class="btn primary" id="applyBtn">Apply changes</button>
+      <button class="btn" id="resetBtn">Reset to defaults</button>
+    </div>
+  </section>
+
+  <footer class="note">
+    This page uses <code>cloudflare-dns.com</code> and <code>dns.google</code> for DNS-over-HTTPS resolution.
+    Browsers can't serve real UDP DNS to other devices — for that, run the companion Python server on any machine
+    and point your devices at it. This page is the live preview of what each state would do.
+  </footer>
+
+</div>
+
+<script>
+// =====================================================================
+//  DEFAULT BLOCKLISTS
+// =====================================================================
+const DEFAULT_ADS = `# --- ad networks ---
+doubleclick.net
+googleadservices.com
+googlesyndication.com
+google-analytics.com
+adservice.google.com
+adnxs.com
+adsrvr.org
+advertising.com
+criteo.com
+criteo.net
+outbrain.com
+taboola.com
+pubmatic.com
+rubiconproject.com
+openx.net
+casalemedia.com
+smartadserver.com
+teads.tv
+sharethrough.com
+mgid.com
+revcontent.com
+zedo.com
+adform.net
+media.net
+bidswitch.net
+33across.com
+gumgum.com
+sovrn.com
+turn.com
+yieldmo.com
+amazon-adsystem.com
+adcolony.com
+applovin.com
+unityads.unity3d.com
+chartboost.com
+vungle.com
+inmobi.com
+mopub.com
+startapp.com
+tapjoy.com
+supersonicads.com
+
+# --- analytics & trackers ---
+scorecardresearch.com
+quantserve.com
+quantcount.com
+comscore.com
+omniture.com
+2o7.net
+omtrdc.net
+demdex.net
+everesttech.net
+adobedtm.com
+hotjar.com
+mouseflow.com
+fullstory.com
+crazyegg.com
+clicktale.net
+luckyorange.com
+inspectlet.com
+mixpanel.com
+amplitude.com
+segment.io
+segment.com
+heapanalytics.com
+kissmetrics.com
+matomo.cloud
+piwik.pro
+statcounter.com
+histats.com
+chartbeat.com
+parsely.com
+newrelic.com
+bugsnag.com
+sentry.io
+branch.io
+adjust.com
+kochava.com
+appsflyer.com
+singular.net
+tenjin.io
+
+# --- social / cross-site ---
+connect.facebook.net
+pixel.facebook.com
+graph.facebook.com
+business.facebook.com
+ads.linkedin.com
+px.ads.linkedin.com
+analytics.twitter.com
+ads.twitter.com
+static.ads-twitter.com
+ads.pinterest.com
+analytics.tiktok.com
+ads.tiktok.com
+business-api.tiktok.com
+ads.snapchat.com
+tr.snapchat.com
+ads.reddit.com
+events.reddit.com
+
+# --- telemetry ---
+telemetry.microsoft.com
+vortex.data.microsoft.com
+settings-win.data.microsoft.com
+watson.telemetry.microsoft.com
+device-metrics-us.amazon.com
+unagi.amazon.com
+dsp.mp.microsoft.com`;
+
+const DEFAULT_STATE2_EXTRA = `# --- State 2 only ---
+example-tracker.com
+ads.example.net
+metrics.example.org`;
+
+// =====================================================================
+//  STATE
+// =====================================================================
+const SINKHOLE = "0.0.0.0";
+
+const state = {
+  1: { blocklist: new Set(), enabled: true, blocked: 0, allowed: 0 },
+  2: { blocklist: new Set(), enabled: true, blocked: 0, allowed: 0 },
+};
+
+function parseList(text) {
+  const set = new Set();
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim().toLowerCase();
+    if (!line || line.startsWith("#")) continue;
+    set.add(line.replace(/\.$/, ""));
+  }
+  return set;
+}
+
+function rebuildBlocklists() {
+  const ads = parseList(document.getElementById("adsList").value);
+  const extra = parseList(document.getElementById("state2List").value);
+  state[1].blocklist = new Set(ads);
+  state[2].blocklist = new Set([...ads, ...extra]);
+  updateStats();
+}
+
+// =====================================================================
+//  BLOCKING LOGIC
+// =====================================================================
+function isBlocked(domain, blocklist) {
+  if (!domain) return false;
+  if (blocklist.has(domain)) return true;
+  const parts = domain.split(".");
+  for (let i = 1; i < parts.length; i++) {
+    if (blocklist.has(parts.slice(i).join("."))) return true;
+  }
+  return false;
+}
+
+// =====================================================================
+//  DOH RESOLVER
+// =====================================================================
+async function dohQuery(name) {
+  const endpoints = [
+    `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(name)}&type=A`,
+    `https://dns.google/resolve?name=${encodeURIComponent(name)}&type=A`,
+  ];
+  let lastErr = new Error("all resolvers failed");
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, { headers: { Accept: "application/dns-json" } });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return await res.json();
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr;
+}
+
+// =====================================================================
+//  UI HELPERS
+// =====================================================================
+const $ = id => document.getElementById(id);
+const logBox = $("log");
+let logEmpty = true;
+
+function log(kind, msg) {
+  if (logEmpty) { logBox.innerHTML = ""; logEmpty = false; }
+  const t = new Date().toLocaleTimeString([], { hour12: false });
+  const div = document.createElement("div");
+  div.className = "entry " + kind;
+  div.innerHTML = `<span class="t">${t}</span><span class="msg"></span>`;
+  div.querySelector(".msg").textContent = msg;
+  logBox.prepend(div);
+  while (logBox.children.length > 100) logBox.removeChild(logBox.lastChild);
+}
+
+function setResult(n, kind, verdict, detail) {
+  const el = $("result" + n);
+  el.className = "result " + kind;
+  el.innerHTML = "";
+  const v = document.createElement("div");
+  v.className = "verdict";
+  v.textContent = verdict;
+  el.appendChild(v);
+  if (detail) {
+    const d = document.createElement("div");
+    d.className = "detail";
+    d.textContent = detail;
+    el.appendChild(d);
+  }
+}
+
+function updateStats() {
+  $("s1b").textContent = state[1].blocked;
+  $("s1a").textContent = state[1].allowed;
+  $("s1n").textContent = state[1].blocklist.size;
+  $("s2b").textContent = state[2].blocked;
+  $("s2a").textContent = state[2].allowed;
+  $("s2n").textContent = state[2].blocklist.size;
+  $("dot1").classList.toggle("off", !state[1].enabled);
+  $("dot2").classList.toggle("off", !state[2].enabled);
+}
+
+// =====================================================================
+//  MAIN QUERY
+// =====================================================================
+function normalize(input) {
+  let d = input.trim().toLowerCase();
+  d = d.replace(/^https?:\/\//, "");   // strip scheme
+  d = d.replace(/\/.*$/, "");          // strip path
+  d = d.replace(/:\d+$/, "");          // strip port
+  d = d.replace(/\.$/, "");            // strip trailing dot
+  return d;
+}
+
+async function runQuery(rawInput) {
+  const domain = normalize(rawInput);
+  if (!domain) return;
+
+  $("resolveBtn").disabled = true;
+
+  // Per-state: check blocklist first, then resolve via DoH if needed
+  const promises = [1, 2].map(async n => {
+    const cfg = state[n];
+    const blocked = cfg.enabled && isBlocked(domain, cfg.blocklist);
+
+    if (blocked) {
+      setResult(n, "blocked", "BLOCKED", `would answer ${SINKHOLE}`);
+      cfg.blocked++;
+      log("blocked", `[State ${n}] BLOCKED  ${domain}`);
+      return;
+    }
+
+    setResult(n, "idle", "Resolving…");
+    try {
+      const json = await dohQuery(domain);
+      const answers = (json.Answer || []).filter(a => a.type === 1);
+      const ips = answers.map(a => a.data);
+      const status = json.Status === 3 ? "NXDOMAIN" : (ips.length ? ips.join(", ") : "no A record");
+      setResult(n, "allowed", "ALLOWED", status);
+      cfg.allowed++;
+      log("allowed", `[State ${n}] allowed  ${domain} → ${status}`);
+    } catch (e) {
+      setResult(n, "error", "ERROR", e.message);
+      log("error", `[State ${n}] ERROR    ${domain}: ${e.message}`);
+    }
+  });
+
+  await Promise.all(promises);
+  updateStats();
+  $("resolveBtn").disabled = false;
+}
+
+// =====================================================================
+//  WIRING
+// =====================================================================
+function init() {
+  $("adsList").value = DEFAULT_ADS;
+  $("state2List").value = DEFAULT_STATE2_EXTRA;
+  rebuildBlocklists();
+
+  const input = $("domain");
+  const btn = $("resolveBtn");
+
+  btn.addEventListener("click", () => runQuery(input.value));
+  input.addEventListener("keydown", e => { if (e.key === "Enter") runQuery(input.value); });
+
+  document.querySelectorAll(".chip").forEach(c => {
+    c.addEventListener("click", () => {
+      input.value = c.dataset.d;
+      runQuery(c.dataset.d);
+    });
+  });
+
+  $("toggle1").addEventListener("change", e => {
+    state[1].enabled = e.target.checked;
+    updateStats();
+    log("info", `State 1 blocking ${state[1].enabled ? "ENABLED" : "DISABLED"}`);
+  });
+  $("toggle2").addEventListener("change", e => {
+    state[2].enabled = e.target.checked;
+    updateStats();
+    log("info", `State 2 blocking ${state[2].enabled ? "ENABLED" : "DISABLED"}`);
+  });
+
+  $("applyBtn").addEventListener("click", () => {
+    rebuildBlocklists();
+    log("info", `blocklists updated — State 1: ${state[1].blocklist.size} rules, State 2: ${state[2].blocklist.size} rules`);
+  });
+
+  $("resetBtn").addEventListener("click", () => {
+    $("adsList").value = DEFAULT_ADS;
+    $("state2List").value = DEFAULT_STATE2_EXTRA;
+    rebuildBlocklists();
+    log("info", "blocklists reset to defaults");
+  });
+
+  updateStats();
+  log("info", "ready");
+}
+
+init();
+</script>
+</body>
+</html>
